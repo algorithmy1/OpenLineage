@@ -29,6 +29,7 @@ import com.google.cloud.spark.bigquery.repackaged.com.google.cloud.bigquery.Tabl
 import com.google.cloud.spark.bigquery.repackaged.com.google.inject.Binder;
 import com.google.cloud.spark.bigquery.repackaged.com.google.inject.Module;
 import com.google.cloud.spark.bigquery.repackaged.com.google.inject.Provides;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import io.openlineage.client.OpenLineage;
 import io.openlineage.client.OpenLineage.DatasetFacets;
@@ -72,6 +73,7 @@ import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.sql.AnalysisException;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
+import org.apache.spark.sql.RowFactory;
 import org.apache.spark.sql.SaveMode;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.expressions.GenericRow;
@@ -676,6 +678,66 @@ class SparkReadWriteIntegTest {
         .first()
         .hasFieldOrPropertyWithValue(NAMESPACE, FILE)
         .hasFieldOrPropertyWithValue(NAME, fileName);
+  }
+
+  @Test
+  void testExternalRDDWithS3Bucket(@TempDir Path writeDir, SparkSession spark)
+      throws InterruptedException, TimeoutException {
+
+    spark.conf().set("fs.s3a.secret.key", "---");
+    spark.conf().set("fs.s3a.access.key", "---" + "");
+
+    String bucketUrl = "s3a://test-openlineage";
+
+    Dataset<Row> dataset =
+        spark.createDataFrame(
+            ImmutableList.of(RowFactory.create(1L, 2L), RowFactory.create(3L, 4L)),
+            new StructType(
+                new StructField[] {
+                  new StructField("a", LongType$.MODULE$, false, Metadata.empty()),
+                  new StructField("b", LongType$.MODULE$, false, Metadata.empty())
+                }));
+
+    dataset.write().mode("overwrite").parquet(bucketUrl + "/rdd_a");
+    dataset.write().mode("overwrite").parquet(bucketUrl + "/rdd_b");
+
+    JavaRDD<Row> rddA = spark.read().parquet(bucketUrl + "/rdd_a").toJavaRDD();
+    JavaRDD<Row> rddB = spark.read().parquet(bucketUrl + "/rdd_b").toJavaRDD();
+
+    JavaRDD<Row> javaRDD =
+        rddA.union(rddB).map(f -> f.getLong(0) + f.getLong(1)).map(l -> RowFactory.create(l));
+
+    spark
+        .createDataFrame(
+            javaRDD,
+            new StructType(
+                new StructField[] {
+                  new StructField("a", LongType$.MODULE$, false, Metadata.empty()),
+                }))
+        .toDF()
+        .write()
+        .mode("overwrite")
+        .parquet(bucketUrl + "/rdd_c");
+
+    // wait for event processing to complete
+    StaticExecutionContextFactory.waitForExecutionEnd();
+    ArgumentCaptor<OpenLineage.RunEvent> lineageEvent =
+        ArgumentCaptor.forClass(OpenLineage.RunEvent.class);
+
+    Mockito.verify(SparkAgentTestExtension.OPEN_LINEAGE_SPARK_CONTEXT, atLeast(1))
+        .emit(lineageEvent.capture());
+    List<OpenLineage.RunEvent> events = lineageEvent.getAllValues();
+    OpenLineage.RunEvent lastEvent = events.get(events.size() - 1);
+
+    assertThat(lastEvent.getOutputs())
+        .hasSize(1)
+        .first()
+        .hasFieldOrPropertyWithValue(NAME, "rdd_c");
+
+    assertThat(lastEvent.getInputs().get(0).getName()).endsWith("rdd_b");
+
+    // TODO: there are 4 inputs -> each input is contained twice, but still they're contained
+    // TODO: input RDD name is /rdd_b
   }
 
   private CompletableFuture sendMessage(

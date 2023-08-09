@@ -238,7 +238,11 @@ public class PlanUtils {
                 FileScanRDD fileScanRDD = (FileScanRDD) rdd;
                 return ScalaConversionUtils.fromSeq(fileScanRDD.filePartitions()).stream()
                     .flatMap(fp -> Arrays.stream(fp.files()))
-                    .map(f -> new Path(f.filePath()).getParent());
+                    .map(
+                        f ->
+                            new Path(f.filePath())
+                                .getParent()); // TODO: this is not working for Spark 3.4 ->
+                // filePath returns SparkPath
               } else {
                 log.warn("Unknown RDD class {}", rdd.getClass().getCanonicalName());
                 return Stream.empty();
