@@ -19,14 +19,44 @@ import io.openlineage.client.transports.HttpConfig;
 import io.openlineage.client.transports.KafkaConfig;
 import io.openlineage.client.transports.KinesisConfig;
 import io.openlineage.spark.api.SparkOpenLineageConfig;
+import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Map;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
 import org.apache.spark.SparkConf;
+// import org.junitpioneer.jupiter.SetEnvironmentVariable;
 import org.junit.jupiter.api.Test;
 
 class ArgumentParserTest {
+
+  @SuppressWarnings("PMD.AvoidAccessibilityAlteration")
+  protected static void setEnv(String key, String value) {
+    try {
+      Map<String, String> env = System.getenv();
+      Class<?> cl = env.getClass();
+      Field field = cl.getDeclaredField("m");
+      field.setAccessible(true);
+      Map<String, String> writableEnv = (Map<String, String>) field.get(env);
+      writableEnv.put(key, value);
+    } catch (Exception e) {
+      throw new IllegalStateException("Failed to set environment variable", e);
+    }
+  }
+
+  @SuppressWarnings("PMD.AvoidAccessibilityAlteration")
+  protected static void deleteEnv(String key) {
+      try {
+          Map<String, String> env = System.getenv();
+          Class<?> cl = env.getClass();
+          Field field = cl.getDeclaredField("m");
+          field.setAccessible(true);
+          Map<String, String> writableEnv = (Map<String, String>) field.get(env);
+          writableEnv.remove(key);
+      } catch (Exception e) {
+          throw new IllegalStateException("Failed to delete environment variable", e);
+      }
+  }
 
   private static final String NS_NAME = "ns_name";
   private static final String JOB_NAMESPACE = "job_namespace";
@@ -40,6 +70,18 @@ class ArgumentParserTest {
   private static final String API_KEY = "random_token";
   private SparkOpenLineageConfig config;
   private static final String TEST_TOKEN = "TOKEN";
+
+  private static final String NS_NAME_VE = "ns_name_ve";
+  private static final String JOB_NAMESPACE_VE = "job_namespace_ve";
+  private static final String JOB_NAME_VE = "job_name_ve";
+  private static final String URL_VE = "http://localhost:5001";
+  private static final String RUN_ID_VE = "ea445b5c-22eb-457a-8007-01c7c52b6e55";
+  private static final String APP_NAME_VE = "test_ve";
+  private static final String DISABLED_FACETS_VE = "[facetve1;facetve2]";
+  private static final String ENDPOINT_VE = "api/v1/lineage";
+  private static final String AUTH_TYPE_VE = "api_key";
+  private static final String API_KEY_VE = "random_token_ve";
+  private static final String TEST_TOKEN_VE = "TOKEN_VE";
 
   @Test
   void testDefaults() {
@@ -61,11 +103,15 @@ class ArgumentParserTest {
     SparkOpenLineageConfig configKinesis =
         ArgumentParser.parse(
             new SparkConf().set(ArgumentParser.SPARK_CONF_TRANSPORT_TYPE, "kinesis"));
+    ArgumentParserTest.setEnv("OPENLINEAGE_TRANSPORT_TYPE", "http");
+    SparkOpenLineageConfig configEnv = ArgumentParser.parse(new SparkConf());
+    ArgumentParserTest.deleteEnv("OPENLINEAGE_TRANSPORT_TYPE");
 
     assertThat(config.getTransportConfig()).isInstanceOf(ConsoleConfig.class);
     assertThat(configHttp.getTransportConfig()).isInstanceOf(HttpConfig.class);
     assertThat(configKafka.getTransportConfig()).isInstanceOf(KafkaConfig.class);
     assertThat(configKinesis.getTransportConfig()).isInstanceOf(KinesisConfig.class);
+    assertThat(configEnv.getTransportConfig()).isInstanceOf(HttpConfig.class);
   }
 
   @Test
@@ -79,11 +125,33 @@ class ArgumentParserTest {
             .set(ArgumentParser.SPARK_CONF_APP_NAME, APP_NAME);
 
     config = ArgumentParser.parse(sparkConf);
+
     assertEquals(JOB_NAMESPACE, config.getParentJobNamespace());
     assertEquals(NS_NAME, config.getNamespace());
     assertEquals(JOB_NAME, config.getParentJobName());
     assertEquals(RUN_ID, config.getParentRunId());
     assertEquals(APP_NAME, config.getOverriddenAppName());
+  }
+
+  @Test
+  void testLoadingVarEnvConfig() {
+    ArgumentParserTest.setEnv("OPENLINEAGE_NAMESPACE", NS_NAME_VE);
+    ArgumentParserTest.setEnv("OPENLINEAGE_PARENT_JOB_NAMESPACE", JOB_NAMESPACE_VE);
+    ArgumentParserTest.setEnv("OPENLINEAGE_PARENT_JOB_NAME", JOB_NAME_VE);
+    ArgumentParserTest.setEnv("OPENLINEAGE_PARENT_RUN_ID", RUN_ID_VE);
+    ArgumentParserTest.setEnv("OPENLINEAGE_APP_NAME", APP_NAME_VE);
+    config = ArgumentParser.parse(new SparkConf());
+    ArgumentParserTest.deleteEnv("OPENLINEAGE_NAMESPACE");
+    ArgumentParserTest.deleteEnv("OPENLINEAGE_PARENT_JOB_NAMESPACE");
+    ArgumentParserTest.deleteEnv("OPENLINEAGE_PARENT_JOB_NAME");
+    ArgumentParserTest.deleteEnv("OPENLINEAGE_PARENT_RUN_ID");
+    ArgumentParserTest.deleteEnv("OPENLINEAGE_APP_NAME");
+
+    assertEquals(JOB_NAMESPACE_VE, config.getParentJobNamespace());
+    assertEquals(NS_NAME_VE, config.getNamespace());
+    assertEquals(JOB_NAME_VE, config.getParentJobName());
+    assertEquals(RUN_ID_VE, config.getParentRunId());
+    assertEquals(APP_NAME_VE, config.getOverriddenAppName());
   }
 
   @Test
@@ -116,6 +184,46 @@ class ArgumentParserTest {
     assertEquals(HttpConfig.Compression.GZIP, transportConfig.getCompression());
   }
 
+  // @Test
+  // void testVarEnvConfToHttpConfig() {
+  //   ArgumentParserTest.setEnv("OPENLINEAGE_TRANSPORT_TYPE", "http");
+  //   ArgumentParserTest.setEnv("OPENLINEAGE_TRANSPORT_URL", URL_VE);
+  //   ArgumentParserTest.setEnv("OPENLINEAGE_TRANSPORT_ENDPOINT", ENDPOINT_VE);
+  //   ArgumentParserTest.setEnv("OPENLINEAGE_TRANSPORT_AUTH_TYPE", AUTH_TYPE_VE);
+  //   ArgumentParserTest.setEnv("OPENLINEAGE_TRANSPORT_AUTH_API_KEY", API_KEY);
+  //   ArgumentParserTest.setEnv("OPENLINEAGE_TRANSPORT_TIMEOUT", "5000");
+  //   ArgumentParserTest.setEnv("OPENLINEAGE_FACETS_DISABLED", DISABLED_FACETS_VE);
+  //   ArgumentParserTest.setEnv("OPENLINEAGE_TRANSPORT_URL_PARAMS_TEST1", "test1");
+  //   ArgumentParserTest.setEnv("OPENLINEAGE_TRANSPORT_URL_PARAMS_TEST2", "test2");
+  //   ArgumentParserTest.setEnv("OPENLINEAGE_TRANSPORT_HEADERS_TESTHEADER1", "test1");
+  //   ArgumentParserTest.setEnv("OPENLINEAGE_TRANSPORT_HEADERS_TESTHEADER2", "test2");
+  //   ArgumentParserTest.setEnv("OPENLINEAGE_TRANSPORT_COMPRESSION", "gzip");
+  //   SparkOpenLineageConfig config = ArgumentParser.parse(new SparkConf());
+  //   ArgumentParserTest.deleteEnv("OPENLINEAGE_TRANSPORT_TYPE");
+  //   ArgumentParserTest.deleteEnv("OPENLINEAGE_TRANSPORT_URL");
+  //   ArgumentParserTest.deleteEnv("OPENLINEAGE_TRANSPORT_ENDPOINT");
+  //   ArgumentParserTest.deleteEnv("OPENLINEAGE_TRANSPORT_AUTH_TYPE");
+  //   ArgumentParserTest.deleteEnv("OPENLINEAGE_TRANSPORT_AUTH_API_KEY");
+  //   ArgumentParserTest.deleteEnv("OPENLINEAGE_TRANSPORT_TIMEOUT");
+  //   ArgumentParserTest.deleteEnv("OPENLINEAGE_FACETS_DISABLED");
+  //   ArgumentParserTest.deleteEnv("OPENLINEAGE_TRANSPORT_URL_PARAMS_TEST1");
+  //   ArgumentParserTest.deleteEnv("OPENLINEAGE_TRANSPORT_URL_PARAMS_TEST2");
+  //   ArgumentParserTest.deleteEnv("OPENLINEAGE_TRANSPORT_HEADERS_TESTHEADER1");
+  //   ArgumentParserTest.deleteEnv("OPENLINEAGE_TRANSPORT_HEADERS_TESTHEADER2");
+  //   ArgumentParserTest.deleteEnv("OPENLINEAGE_TRANSPORT_COMPRESSION");
+
+  //   HttpConfig transportConfig = (HttpConfig) config.getTransportConfig();
+  //   assertEquals(URL_VE, transportConfig.getUrl().toString());
+  //   assertEquals(ENDPOINT_VE, transportConfig.getEndpoint());
+  //   assert (transportConfig.getAuth() != null);
+  //   assert (transportConfig.getAuth() instanceof ApiKeyTokenProvider);
+  //   assertEquals("Bearer random_token", transportConfig.getAuth().getToken());
+  //   assertEquals(5000, transportConfig.getTimeout());
+  //   assertEquals("test1", transportConfig.getHeaders().get("testHeader1"));
+  //   assertEquals("test2", transportConfig.getHeaders().get("testHeader2"));
+  //   assertEquals(HttpConfig.Compression.GZIP, transportConfig.getCompression());
+  // }
+
   @Test
   void testConfToKafkaConfig() {
     SparkConf sparkConf =
@@ -126,6 +234,27 @@ class ArgumentParserTest {
             .set("spark.openlineage.transport.properties.test1", "test1")
             .set("spark.openlineage.transport.properties.test2", "test2");
     SparkOpenLineageConfig config = ArgumentParser.parse(sparkConf);
+    KafkaConfig transportConfig = (KafkaConfig) config.getTransportConfig();
+    assertEquals("test", transportConfig.getTopicName());
+    assertEquals("explicit-key", transportConfig.getMessageKey());
+    assertEquals("test1", transportConfig.getProperties().get("test1"));
+    assertEquals("test2", transportConfig.getProperties().get("test2"));
+  }
+
+  @Test
+  void testVarEnvConfToHttpConfig() {
+    ArgumentParserTest.setEnv("OPENLINEAGE_TRANSPORT_TYPE", "kafka");
+    ArgumentParserTest.setEnv("OPENLINEAGE_TRANSPORT_TOPIC_NAME", "test");
+    ArgumentParserTest.setEnv("OPENLINEAGE_TRANSPORT_MESSAGE_KEY", "explicit-key");
+    ArgumentParserTest.setEnv("OPENLINEAGE_TRANSPORT_PROPERTIES_TEST1", "test1");
+    ArgumentParserTest.setEnv("OPENLINEAGE_TRANSPORT_PROPERTIES_TEST2", "test2");
+    SparkOpenLineageConfig config = ArgumentParser.parse(new SparkConf());
+    ArgumentParserTest.deleteEnv("OPENLINEAGE_TRANSPORT_TYPE");
+    ArgumentParserTest.deleteEnv("OPENLINEAGE_TRANSPORT_TOPIC_NAME");
+    ArgumentParserTest.deleteEnv("OPENLINEAGE_TRANSPORT_MESSAGE_KEY");
+    ArgumentParserTest.deleteEnv("OPENLINEAGE_TRANSPORT_PROPERTIES_TEST1");
+    ArgumentParserTest.deleteEnv("OPENLINEAGE_TRANSPORT_PROPERTIES_TEST2");
+
     KafkaConfig transportConfig = (KafkaConfig) config.getTransportConfig();
     assertEquals("test", transportConfig.getTopicName());
     assertEquals("explicit-key", transportConfig.getMessageKey());
@@ -278,4 +407,32 @@ class ArgumentParserTest {
         .hasFieldOrPropertyWithValue(
             "hosts", Arrays.asList("postgres-host1-test", "postgres-host1-test"));
   }
+
+  // @Test
+  // @SetEnvironmentVariable(key = "AWS_DEFAULT_REGION", value = "us-west-2")
+  // void testA() {
+  //   SparkConf sparkConf =
+  //       new SparkConf()
+  //           .set("spark.openlineage.dataset.namespaceResolvers.postgres-prod.type", "hostList")
+  //           .set(
+  //               "spark.openlineage.dataset.namespaceResolvers.postgres-prod.hosts",
+  //               "[postgres-host1-prod;postgres-host1-prod]")
+  //           .set("spark.openlineage.dataset.namespaceResolvers.postgres-test.type", "hostList")
+  //           .set(
+  //               "spark.openlineage.dataset.namespaceResolvers.postgres-test.hosts",
+  //               "[postgres-host1-test;postgres-host1-test]");
+
+  //   SparkOpenLineageConfig config = ArgumentParser.parse(sparkConf);
+
+  //   Map<String, DatasetNamespaceResolverConfig> namespaceResolvers =
+  //       config.getDatasetConfig().getNamespaceResolvers();
+  //   assertThat(namespaceResolvers.keySet()).hasSize(2);
+  //   assertThat(namespaceResolvers.get("postgres-prod"))
+  //       .hasFieldOrPropertyWithValue(
+  //           "hosts", Arrays.asList("postgres-host1-prod", "postgres-host1-prod"));
+
+  //   assertThat(namespaceResolvers.get("postgres-test"))
+  //       .hasFieldOrPropertyWithValue(
+  //           "hosts", Arrays.asList("postgres-host1-test", "postgres-host1-test"));
+  // }
 }

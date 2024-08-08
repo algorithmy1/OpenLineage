@@ -26,6 +26,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.Map;
+import java.util.HashMap; 
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -37,46 +39,111 @@ import scala.Tuple2;
 public class ArgumentParser {
 
   public static final String SPARK_CONF_NAMESPACE = "spark.openlineage.namespace";
+  public static final String ENV_VAR_NAMESPACE = "OPENLINEAGE_NAMESPACE";
+
   public static final String SPARK_CONF_PARENT_JOB_NAMESPACE =
       "spark.openlineage.parentJobNamespace";
+  public static final String ENV_VAR_PARENT_JOB_NAMESPACE = "OPENLINEAGE_PARENT_JOB_NAMESPACE";
+  
   public static final String SPARK_CONF_PARENT_JOB_NAME = "spark.openlineage.parentJobName";
+  public static final String ENV_VAR_PARENT_JOB_NAME = "OPENLINEAGE_PARENT_JOB_NAME";
+
   public static final String SPARK_CONF_PARENT_RUN_ID = "spark.openlineage.parentRunId";
+  public static final String ENV_VAR_PARENT_RUN_ID = "OPENLINEAGE_PARENT_RUN_ID";
+
   public static final String SPARK_CONF_APP_NAME = "spark.openlineage.appName";
+  public static final String ENV_VAR_APP_NAME = "OPENLINEAGE_APP_NAME";
+
   public static final String ARRAY_PREFIX_CHAR = "[";
   public static final String ARRAY_SUFFIX_CHAR = "]";
   public static final String DISABLED_FACETS_SEPARATOR = ";";
+
   public static final String SPARK_CONF_TRANSPORT_TYPE = "spark.openlineage.transport.type";
+  public static final String ENV_VAR_TRANSPORT_TYPE = "OPENLINEAGE_TRANSPORT_TYPE";
+
   public static final String SPARK_CONF_HTTP_URL = "spark.openlineage.transport.url";
+  public static final String ENV_VAR_HTTP_URL = "OPENLINEAGE_TRANSPORT_URL";
+
   public static final String SPARK_CONF_JOB_NAME_APPEND_DATASET_NAME =
       "spark.openlineage.jobName.appendDatasetName";
+  public static final String ENV_VAR_JOB_NAME_APPEND_DATASET_NAME =
+      "OPENLINEAGE_JOB_NAME_APPEND_DATASET_NAME";
+
   public static final String SPARK_CONF_JOB_NAME_REPLACE_DOT_WITH_UNDERSCORE =
       "spark.openlineage.jobName.replaceDotWithUnderscore";
+  public static final String ENV_VAR_JOB_NAME_REPLACE_DOT_WITH_UNDERSCORE =
+      "OPENLINEAGE_JOB_NAME_REPLACE_DOT_WITH_UNDERSCORE";
+  
   private static final String SPARK_CONF_FACETS_DISABLED = "spark.openlineage.facets.disabled";
+  private static final String ENV_VAR_FACETS_DISABLED = "OPENLINEAGE_FACETS_DISABLED";
 
   private static final String SPARK_CONF_DEBUG_FACET = "spark.openlineage.debugFacet";
+  private static final String ENV_VAR_DEBUG_FACET = "OPENLINEAGE_DEBUG_FACET";
 
   private static final String SPARK_TEST_EXTENSION_PROVIDER =
       "spark.openlineage.testExtensionProvider";
+  private static final String ENV_VAR_TEST_EXTENSION_PROVIDER = 
+      "OPENLINEAGE_TEST_EXTENSION_PROVIDER";
 
   public static final Set<String> PROPERTIES_PREFIXES =
       new HashSet<>(
           Arrays.asList("transport.properties.", "transport.urlParams.", "transport.headers."));
+  
+  public static final Set<String> ENV_VAR_PREFIXES =
+      new HashSet<>(
+          Arrays.asList( 
+            "OPENLINEAGE_TRANSPORT_PROPERTIES_", 
+            "OPENLINEAGE_TRANSPORT_URL_PARAMS_", 
+            "OPENLINEAGE_TRANSPORT_HEADERS_",
+            "OPENLINEAGE_TRANSPORT_FACETS_",
+            )
+          );
 
   private static final String disabledFacetsSeparator = ";";
+
+  private static final Map<String, String> ENV_TO_SPARK_CONF_MAP = new HashMap<>();
+  static {
+    ENV_TO_SPARK_CONF_MAP.put(ENV_VAR_NAMESPACE, SPARK_CONF_NAMESPACE);
+    ENV_TO_SPARK_CONF_MAP.put(ENV_VAR_PARENT_JOB_NAMESPACE, SPARK_CONF_PARENT_JOB_NAMESPACE);
+    ENV_TO_SPARK_CONF_MAP.put(ENV_VAR_PARENT_JOB_NAME, SPARK_CONF_PARENT_JOB_NAME);
+    ENV_TO_SPARK_CONF_MAP.put(ENV_VAR_PARENT_RUN_ID, SPARK_CONF_PARENT_RUN_ID);
+    ENV_TO_SPARK_CONF_MAP.put(ENV_VAR_APP_NAME, "spark.openlineage.overriddenAppName");
+    ENV_TO_SPARK_CONF_MAP.put(ENV_VAR_TRANSPORT_TYPE, SPARK_CONF_TRANSPORT_TYPE);
+    ENV_TO_SPARK_CONF_MAP.put(ENV_VAR_HTTP_URL, SPARK_CONF_HTTP_URL);
+    ENV_TO_SPARK_CONF_MAP.put(ENV_VAR_JOB_NAME_APPEND_DATASET_NAME, SPARK_CONF_JOB_NAME_APPEND_DATASET_NAME);
+    ENV_TO_SPARK_CONF_MAP.put(ENV_VAR_JOB_NAME_REPLACE_DOT_WITH_UNDERSCORE, SPARK_CONF_JOB_NAME_REPLACE_DOT_WITH_UNDERSCORE);
+    ENV_TO_SPARK_CONF_MAP.put(ENV_VAR_FACETS_DISABLED, SPARK_CONF_FACETS_DISABLED);
+    ENV_TO_SPARK_CONF_MAP.put(ENV_VAR_DEBUG_FACET, SPARK_CONF_DEBUG_FACET);
+    ENV_TO_SPARK_CONF_MAP.put(ENV_VAR_TEST_EXTENSION_PROVIDER, SPARK_TEST_EXTENSION_PROVIDER);
+  }
 
   public static SparkOpenLineageConfig parse(SparkConf conf) {
     // TRY READING CONFIG FROM FILE
     Optional<SparkOpenLineageConfig> configFromFile = extractOpenLineageConfFromFile();
 
+    // TRY READING CONFIG FROM ENV VAR
+    Optional <SparkOpenLineageConfig> configFromEnvVar = extractOpenLineageConfFromEnvVar();
+
     if ("http".equals(conf.get(SPARK_CONF_TRANSPORT_TYPE, ""))) {
       findSparkConfigKey(conf, SPARK_CONF_HTTP_URL)
           .ifPresent(url -> UrlParser.parseUrl(url).forEach(conf::set));
     }
+    else if ("http".equals(System.getenv(ENV_VAR_TRANSPORT_TYPE))) {
+      Optional<String> url = Optional.ofNullable(System.getenv(ENV_VAR_HTTP_URL));
+      url.ifPresent(u -> UrlParser.parseUrl(u).forEach(conf::set));
+    }
+
     SparkOpenLineageConfig configFromSparkConf = extractOpenLineageConfFromSparkConf(conf);
 
     SparkOpenLineageConfig targetConfig;
-    if (configFromFile.isPresent()) {
+    if (configFromFile.isPresent() && configFromEnvVar.isPresent()) {
+      targetConfig = configFromFile.get().mergeWith(configFromEnvVar.get()).mergeWith(configFromSparkConf);
+    }
+    else if (configFromFile.isPresent()) {
       targetConfig = configFromFile.get().mergeWith(configFromSparkConf);
+    }
+    else if (configFromEnvVar.isPresent()) {
+      targetConfig = configFromEnvVar.get().mergeWith(configFromSparkConf);
     } else {
       targetConfig = configFromSparkConf;
     }
@@ -132,6 +199,52 @@ public class ArgumentParser {
                     .filter(StringUtils::isNotBlank)
                     .toArray(String[]::new))
         .ifPresent(a -> config.getFacetsConfig().setDisabledFacets(a));
+  }
+
+  private static Optional<SparkOpenLineageConfig> extractOpenLineageConfFromEnvVar() {
+    Map<String, String> envVars = System.getenv();
+    ObjectMapper objectMapper = new ObjectMapper();
+    ObjectNode objectNode = objectMapper.createObjectNode();
+
+    for (Map.Entry<String, String> entry : envVars.entrySet()) {
+        String envKey = entry.getKey();
+        String value = entry.getValue();
+
+        if (ENV_TO_SPARK_CONF_MAP.containsKey(envKey) && StringUtils.isNotBlank(value)) {
+            String sparkConfKey = ENV_TO_SPARK_CONF_MAP.get(envKey);
+            String keyPath = sparkConfKey.substring("spark.openlineage.".length());
+            List<String> pathKeys = getJsonPath(keyPath);
+            ObjectNode nodePointer = objectNode;
+
+            for (int i = 0; i < pathKeys.size() - 1; i++) {
+                String node = pathKeys.get(i);
+                if (nodePointer.get(node) == null) {
+                    nodePointer.putObject(node);
+                }
+                nodePointer = (ObjectNode) nodePointer.get(node);
+            }
+
+            String leaf = pathKeys.get(pathKeys.size() - 1);
+            if (isArrayType(value) || ENV_VAR_FACETS_DISABLED.equals(envKey)) {
+                ArrayNode arrayNode = nodePointer.putArray(leaf);
+                String valueWithoutBrackets = isArrayType(value) ? value.substring(1, value.length() - 1) : value;
+                Arrays.stream(valueWithoutBrackets.split(DISABLED_FACETS_SEPARATOR))
+                    .filter(StringUtils::isNotBlank)
+                    .forEach(arrayNode::add);
+            } else {
+                nodePointer.put(leaf, value);
+            }
+        }
+    }
+
+    try {
+        return Optional.of(OpenLineageClientUtils.loadOpenLineageConfigYaml(
+            new ByteArrayInputStream(objectMapper.writeValueAsBytes(objectNode)),
+            new TypeReference<SparkOpenLineageConfig>() {}));
+    } catch (IOException e) {
+        log.warn("Failed to parse OpenLineage configuration from environment variables", e);
+        return Optional.empty();
+    }
   }
 
   /**
